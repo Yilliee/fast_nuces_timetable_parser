@@ -289,12 +289,20 @@ def main():
         sys.exit(2)
 
     list_of_sheets = workbook.sheetnames
-    timetable_sheet = workbook.active
-    list_of_sheets.remove(timetable_sheet.title)
+    timetable_sheet = workbook.active.title
+
+    for sheet in list_of_sheets:
+        sheet_lower = sheet.lower()
+        if 'tt' in sheet_lower or 'timetable' in sheet_lower:
+            if timetable_sheet != sheet:
+                timetable_sheet = sheet
+            break
+
+    list_of_sheets.remove(timetable_sheet)
 
     course_details = get_course_details(workbook, list_of_sheets)
 
-    course_timetable = parse_timetable(timetable_sheet)
+    course_timetable = parse_timetable(workbook[timetable_sheet])
 
     # Update timetable's course titles to match those in course details
     course_timetable['title'] = course_timetable.apply(

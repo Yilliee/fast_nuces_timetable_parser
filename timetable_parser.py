@@ -280,13 +280,18 @@ def main():
     except IndexError:
         filename = 'timetable.xlsx'
 
+    output_csv_filename = f"{filename.split('/')[-1].strip('.xlsx')}.csv"
+
     # Load the Excel file
+    print(f'Attempting to open {filename}')
     try:
         workbook = openpyxl.load_workbook(filename)
     except FileNotFoundError:
         sys.stderr.write(f'Error : Unable to open file: {filename}.\n')
         # _print_example_usage()
         sys.exit(2)
+
+    print(f'Successfully opened {filename}')
 
     list_of_sheets = workbook.sheetnames
     timetable_sheet = workbook.active.title
@@ -300,23 +305,29 @@ def main():
 
     list_of_sheets.remove(timetable_sheet)
 
+    print('\nExtracting course details...')
     course_details = get_course_details(workbook, list_of_sheets)
+    print('Done.')
 
+    print('\nExtracting class details...')
     course_timetable = parse_timetable(workbook[timetable_sheet])
+    print('Done.')
 
     # Update timetable's course titles to match those in course details
+    print('\nMerging course and class details...')
     course_timetable['title'] = course_timetable.apply(
        lambda row: _get_corresponding_title(row, course_details),
        axis=1
     )
-
     course_data = course_details.merge(
        course_timetable, on=['section', 'title'], how='inner'
     )
+    print('Done.')
 
-    with open(f"{filename.split('/')[-1].strip('.xlsx')}.csv", 'w') as file:
+    print(f'\nExporting to {output_csv_filename}')
+    with open(output_csv_filename, 'w') as file:
         course_data.to_csv(file)
-
+    print('Done')
 
 if __name__ == "__main__":
     main()

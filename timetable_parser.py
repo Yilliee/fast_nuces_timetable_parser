@@ -51,6 +51,19 @@ def parse_timetable(sheet: pyxl_Worksheet) -> pd.DataFrame:
     course_cache = {}
 
     day = ''
+
+    starting_time = sheet[STARTING_ROW][2].value
+    if starting_time is None or ':' not in starting_time:
+        hours_offset = 8
+        minutes_offset = 30
+    else:
+        starting_time = starting_time.split(':')
+        hours_offset = int(starting_time[0])
+        minutes_offset = int(starting_time[1][:2])
+        is_pm = 'pm' in starting_time[1][2:].lower()
+        if is_pm:
+            hours_offset += 12
+
     for row in sheet.iter_rows(min_row=STARTING_ROW):
         if row[0].value is not None:
             day = _get_day(row[0].value)
@@ -81,24 +94,40 @@ def parse_timetable(sheet: pyxl_Worksheet) -> pd.DataFrame:
 
             section_list = course_details[1].strip().rstrip(')').split(',')
 
-            start_time = [(8 + (col_no - STARTING_COL) // 6),
-                          ((col_no - STARTING_COL) % 6) * 10]
+            start_time = [(hours_offset + (col_no - STARTING_COL) // 6),
+                          minutes_offset + ((col_no - STARTING_COL) % 6) * 10]
+            if start_time[1] >= 60:
+                start_time[0] += 1
+                start_time[1] -= 60
 
             cell_length = cell_coordinates.get((cell.row, cell.column), 1)
+
+            if cell_length == 1:
+                cells_remaining = total_columns - col_no
+                starting_color = cell.fill.start_color.index
+                while cell_length < cells_remaining:
+                    end_cell = row[col_no + cell_length]
+                    if (end_cell.value is not None or
+                            end_cell.fill.start_color.index != starting_color):
+                        break
+                    cell_length += 1
+                    if cell.border.right.style is not None:
+                        break
+
             col_no += cell_length
 
             length_of_class = [(cell_length // 6),
                                (cell_length % 6) * 10]
             end_time = [start_time[i] + length_of_class[i] for i in range(2)]
-            if end_time[1] > 60:
+            if end_time[1] >= 60:
                 end_time[0] += 1
                 end_time[1] -= 60
 
             current_lecture = {
                 'room': room,
                 'day': day,
-                'start_time': f'{start_time[0]}:{start_time[1]}',
-                'end_time': f'{end_time[0]}:{end_time[1]}',
+                'start_time': f'{start_time[0]:02}:{start_time[1]:02}',
+                'end_time': f'{end_time[0]:02}:{end_time[1]:02}',
             }
 
             for section in section_list:
@@ -116,7 +145,9 @@ def parse_timetable(sheet: pyxl_Worksheet) -> pd.DataFrame:
                         'lectures': [current_lecture],
                     })
 
-    return pd.DataFrame(courses, columns=courses[0].keys())
+    if len(courses) > 0:
+        return pd.DataFrame(courses, columns=courses[0].keys())
+    return pd.DataFrame()
 
 
 def _get_dept_from_course_code(course_code: str) -> str:
@@ -139,54 +170,74 @@ def get_course_details(workbook: openpyxl.Workbook,
 
     for sheet_name in sheets_list:
         sheet = workbook[sheet_name]
-        columns_in_sheet = []
 
-        for cell in sheet[2]:
-            if cell.value is None:
-                break
-            columns_in_sheet.append(cell.value.lower().strip())
-
+        starting_row = -1
         col_num = {}
+        course_cache = set()
 
-        # Do we even have the columns ?
-        for index, col_name in enumerate(columns_in_sheet):
-            if 'code' not in col_num and 'code' in col_name:
-                col_num['code'] = index
-            elif 'title' not in col_num and 'title' in col_name:
-                col_num['title'] = index
-            elif 'section' not in col_num and 'section' in col_name:
-                col_num['section'] = index
-            elif 'instructor' not in col_num and ('teacher' in col_name or
-                                                  'instructor' in col_name):
-                col_num['instructor'] = index
-            elif 'credit_hours' not in col_num and 'credit hour' in col_name:
-                col_num['credit_hours'] = index
-            elif 'offered_for' not in col_num and 'offered' in col_name:
-                col_num['offered_for'] = index
-            elif 'category' not in col_num and 'category' in col_name:
-                col_num['category'] = index
+        for row_no in range(2, sheet.max_row):
+            columns_in_sheet = []
 
-        # Do we have our main identifiers ?
-        if ('code' not in col_num or 'section' not in col_num or
-                'title' not in col_num):
-            continue
+            for cell in sheet[row_no]:
+                if cell.value is None:
+                    break
+                if type(cell.value) is not str:
+                    continue
+                columns_in_sheet.append(cell.value.lower().strip())
 
-        # First row to start parsing at
-        starting_row = 3
+            col_num.clear()
+
+            # Do we even have the columns ?
+            for index, col_name in enumerate(columns_in_sheet):
+                col_name = col_name.lower()
+                if 'code' not in col_num and 'code' in col_name:
+                    col_num['code'] = index
+                elif 'title' not in col_num and ('title' in col_name or
+                                                 'course' in col_name):
+                    col_num['title'] = index
+                elif 'section' not in col_num and 'section' in col_name:
+                    col_num['section'] = index
+                elif ('instructor' not in col_num and
+                        ('teacher' in col_name or 'instructor' in col_name)):
+                    col_num['instructor'] = index
+                elif ('credit_hours' not in col_num and
+                        'credit hour' in col_name):
+                    col_num['credit_hours'] = index
+                elif 'offered_for' not in col_num and 'offered' in col_name:
+                    col_num['offered_for'] = index
+                elif 'category' not in col_num and 'category' in col_name:
+                    col_num['category'] = index
+
+            # Do we have our main identifiers ?
+            if ('code' in col_num and 'section' in col_num and
+                    'title' in col_num):
+                # First row to start parsing at
+                starting_row = row_no + 1
+                break
+
+        if starting_row == sheet.max_row or starting_row == -1:
+            break
 
         for row in sheet.iter_rows(min_row=starting_row, values_only=True):
             code, title = row[col_num['code']], row[col_num['title']]
             if code is None or title is None:
                 continue
+            title = title.strip().replace('&', 'and', 1)
+            code = code.strip()
 
             section = row[col_num['section']]
             if section is not None:
                 section.strip()
 
+            # Skip duplicates if any
+            if (title, section) in course_cache:
+                continue
+            course_cache.add((title, section))
+
             course = {
                 # Replace & with and for easier matching later on,
-                'title': title.strip().replace('&', 'and', 1),
-                'code': code.strip(),
+                'title': title,
+                'code': code,
                 'section': section,
             }
 
@@ -236,7 +287,9 @@ def get_course_details(workbook: openpyxl.Workbook,
 
             course_details.append(course)
 
-    return pd.DataFrame(course_details, columns=course_details[0].keys())
+    if len(course_details) > 0:
+        return pd.DataFrame(course_details, columns=course_details[0].keys())
+    return pd.DataFrame()
 
 
 def _get_corresponding_title(row: pandas.core.series.Series,
@@ -320,7 +373,7 @@ def main():
        axis=1
     )
     course_data = course_details.merge(
-       course_timetable, on=['section', 'title'], how='inner'
+       course_timetable, on=['section', 'title'], how='right'
     )
     print('Done.')
 
@@ -328,6 +381,7 @@ def main():
     with open(output_csv_filename, 'w') as file:
         course_data.to_csv(file)
     print('Done')
+
 
 if __name__ == "__main__":
     main()

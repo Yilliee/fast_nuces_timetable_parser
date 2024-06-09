@@ -209,7 +209,7 @@ def get_course_details(workbook: xl.Workbook,
                         ('teacher' in col_name or 'instructor' in col_name)):
                     col_num['instructor'] = index
                 elif ('credit_hours' not in col_num and
-                        'credit hour' in col_name):
+                        'credit' in col_name):
                     col_num['credit_hours'] = index
                 elif 'offered_for' not in col_num and 'offered' in col_name:
                     col_num['offered_for'] = index

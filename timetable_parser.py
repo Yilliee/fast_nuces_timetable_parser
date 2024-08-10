@@ -230,10 +230,10 @@ def get_course_details(workbook: xl.Workbook,
         for row in sheet.iter_rows(min_row=starting_row, values_only=True):
             code, title = row[col_num['code']], row[col_num['title']]
             section = row[col_num['section']]
-            if title is None:
+            if title is None and (code is None or 'repeat' not in code.lower()):
                 continue
             if code is None or section is None:
-                if 'repeat' in title.lower():
+                if (title is not None and 'repeat' in title.lower()) or (code is not None and 'repeat' in code.lower()):
                     repeated = True
                 else:
                     repeated = False
